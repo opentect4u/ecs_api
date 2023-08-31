@@ -1,0 +1,332 @@
+CREATE OR REPLACE PROCEDURE P_OPEN_CLOSE_REGISTER
+(adt_from_dt  				Date,
+ adt_to_dt   				  Date,
+ as_acc_status  			Varchar2)
+As
+ld_opening_prn  			Number(20,2):=0;
+ld_mat_val   				  Number(20,2):=0;
+ls_particulars				   VARCHAR2(100);
+ls_trans_mode				VARCHAR2(10);
+ls_trf_type					    VARCHAR2(5);
+
+Begin
+  Declare Cursor C_deposit Is
+  Select *
+  From   tm_deposit
+  Where  opening_dt between adt_from_dt  And adt_to_dt
+  And    Nvl(acc_status,'O') = as_acc_status
+  Union
+  Select *
+  From   tm_deposit
+  Where  acc_close_dt between adt_from_dt  And adt_to_dt
+  And    Nvl(acc_status,'O') = as_acc_status;
+Begin
+  Delete From tt_open_close_register;
+
+  For r_deposit In c_deposit Loop
+      If r_deposit.acc_type_cd In (1,8,9,10,11,12) Then
+      Begin
+        Select Nvl(balance_amt,0)
+        Into   ld_opening_prn
+        From   gm_sb_balance
+        Where  acc_type_cd = r_deposit.acc_type_cd
+        And    acc_num        = r_deposit.acc_num
+        And    balance_dt     = r_deposit.opening_dt;
+      Exception
+        When No_DATA_FOUND Then
+        Select Nvl(balance_amt,0)
+        Into   ld_opening_prn
+        From   gm_sb_balance
+        Where  acc_type_cd = r_deposit.acc_type_cd
+        And    acc_num     = r_deposit.acc_num
+        And    balance_dt  = (Select Min(balance_dt)
+                				       From   gm_sb_balance
+                				       Where  acc_type_cd = r_deposit.acc_type_cd
+                 					   And    acc_num     = r_deposit.acc_num);
+      End;
+      IF as_acc_status = 'C' THEN
+      
+       begin
+		  SELECT trf_type
+	      INTO   ls_trf_type
+	      FROM   v_trans_dtls
+	      WHERE  acc_type_cd = r_deposit.acc_type_cd
+	      And    acc_num     = r_deposit.acc_num
+	      AND    trans_dt = r_deposit.acc_close_dt
+	      AND    nvl(trans_mode,'Z')  = 'C';
+	   EXCEPTION
+	   	   WHEN NO_DATA_FOUND then
+	   	   ls_trf_type := 'C';
+	   END;   
+	      
+      	  IF ls_trf_type = 'C' THEN
+      	      ls_particulars := 'To Cash';
+      	  Else
+		      SELECT particulars
+		      INTO    ls_particulars
+		      FROM   v_trans_dtls
+		      WHERE  acc_type_cd = r_deposit.acc_type_cd
+		      And    acc_num     = r_deposit.acc_num
+		      AND    trans_dt = r_deposit.acc_close_dt
+		      AND    nvl(trans_mode,'Z') In ('C','R');
+		   END IF;
+	    ELSE
+	      ls_particulars := '';
+	    END if;
+	    
+      Insert Into tt_open_close_register(acc_type_cd,
+                 acc_num,
+                 dep_loan_flag,
+                 cust_cd,
+                   opening_dt,
+                 opening_prn,
+                 intt_amt,
+                 acc_status,
+                 particulars)
+             Values(r_deposit.acc_type_cd,
+                r_deposit.acc_num,
+                'D',
+                r_deposit.cust_cd,
+                Decode(as_acc_status,'O',r_deposit.opening_dt,r_deposit.acc_close_dt),
+                Decode(as_acc_status,'O',ld_opening_prn,r_deposit.closing_prn_amt),
+                Decode(as_acc_status,'O',r_deposit.intt_amt,(r_deposit.closing_intt_amt + r_deposit.bonus_amt)),
+                as_acc_status,
+                ls_particulars);
+  /*ElsIf r_deposit.acc_type_cd = 11 Then
+    if as_acc_status = 'O' Then
+     Begin
+      Select Nvl(paid_amt,0)
+      Into   ld_opening_prn
+      From   tm_daily_deposit
+      Where  acc_num     = r_deposit.acc_num
+      And    due_dt     = r_deposit.opening_dt;
+    Exception
+        when no_data_found then
+          ld_opening_prn := 0.00;
+     end;
+    end if;
+     IF as_acc_status = 'C' THEN
+		  SELECT trf_type
+	      INTO    ls_trf_type
+	      FROM   v_trans_dtls
+	      WHERE  acc_type_cd = r_deposit.acc_type_cd
+	      And    acc_num     = r_deposit.acc_num
+	      AND    trans_dt = r_deposit.acc_close_dt
+	      AND    nvl(trans_mode,'Z')  = 'C';
+      	  IF ls_trf_type = 'C' THEN
+      	      ls_particulars := 'To Cash';
+      	  Else
+		      SELECT particulars
+		      INTO    ls_particulars
+		      FROM   v_trans_dtls
+		      WHERE  acc_type_cd = r_deposit.acc_type_cd
+		      And    acc_num     = r_deposit.acc_num
+		      AND    trans_dt = r_deposit.acc_close_dt
+		      AND    nvl(trans_mode,'Z') In ('C','R');
+		   END IF;
+	    ELSE
+	      ls_particulars := '';
+	    END if;
+      Insert Into tt_open_close_register(acc_type_cd,
+                 acc_num,
+                 dep_loan_flag,
+                 cust_cd,
+                   opening_dt,
+                 opening_prn,
+                 acc_status,
+                 intt_rt,
+                 period,
+                 agent_cd,
+                   mat_dt,
+                 intt_amt,
+                 particulars)
+             Values(r_deposit.acc_type_cd,
+                r_deposit.acc_num,
+                'D',
+                r_deposit.cust_cd,
+                Decode(as_acc_status,'O',r_deposit.opening_dt,r_deposit.acc_close_dt),
+                Decode(as_acc_status,'O',ld_opening_prn,r_deposit.prn_amt),
+                as_acc_status,
+                r_deposit.intt_rt,
+                r_deposit.dep_period,
+                r_deposit.agent_cd,
+                r_deposit.mat_dt,
+                Decode(as_acc_status,'O',r_deposit.intt_amt,r_deposit.closing_intt_amt),
+                ls_particulars);  */
+    ElsIf r_deposit.acc_type_cd = 6 Then
+     if as_acc_status = 'O' then
+      Select Nvl(amount,0)
+      Into   ld_opening_prn
+      From   v_trans_dtls
+      Where  acc_type_cd  = 6
+        And    acc_num      = r_deposit.acc_num
+      And    approval_status = 'A'
+      And    trans_mode = 'O';
+    End if;
+
+      Select f_calcrdintt_reg(r_deposit.acc_num,
+              r_deposit.instl_amt,
+              r_deposit.instl_no,
+              r_deposit.intt_rt)
+      into   ld_mat_val
+      from   dual;
+
+      If as_acc_status = 'C' Then
+       Select Nvl(amount,0)
+       Into   ld_opening_prn
+         From   v_trans_dtls
+       Where  acc_type_cd = r_deposit.acc_type_cd
+       And    acc_num     = r_deposit.acc_num
+        And    approval_status = 'A'
+       And    trans_mode = 'C';
+		  SELECT trf_type
+	      INTO    ls_trf_type
+	      FROM   v_trans_dtls
+	      WHERE  acc_type_cd = r_deposit.acc_type_cd
+	      And    acc_num     = r_deposit.acc_num
+	      AND    trans_dt = r_deposit.acc_close_dt
+	      AND    nvl(trans_mode,'Z')  = 'C';
+      	  IF ls_trf_type = 'C' THEN
+      	      ls_particulars := 'To Cash';
+      	  Else
+		      SELECT particulars
+		      INTO    ls_particulars
+		      FROM   v_trans_dtls
+		      WHERE  acc_type_cd = r_deposit.acc_type_cd
+		      And    acc_num     = r_deposit.acc_num
+		      AND    trans_dt = r_deposit.acc_close_dt
+		      AND    nvl(trans_mode,'Z') = 'C';
+		   END IF;
+	    ELSE
+	      ls_particulars := '';
+	    END IF;
+      Insert Into tt_open_close_register(acc_type_cd,
+                 acc_num,
+                 dep_loan_flag,
+                 cust_cd,
+                   opening_dt,
+                 opening_prn,
+                 acc_status,
+                 intt_rt,
+                 period,
+                 agent_cd,
+                 instl_no,
+                 mat_val,
+                 mat_dt,
+                 intt_amt,
+                 particulars)
+             Values(r_deposit.acc_type_cd,
+                r_deposit.acc_num,
+                'D',
+                r_deposit.cust_cd,
+                Decode(as_acc_status,'O',r_deposit.opening_dt,r_deposit.acc_close_dt),
+                ld_opening_prn,
+                as_acc_status,
+                r_deposit.intt_rt,
+                r_deposit.dep_period,
+                r_deposit.agent_cd,
+                r_deposit.instl_no,
+                ((r_deposit.instl_no * r_deposit.instl_amt)+ld_mat_val),
+                r_deposit.mat_dt,
+                Decode(as_acc_status,'O',ld_mat_val,r_deposit.closing_intt_amt),
+                ls_particulars);
+    ElsIf r_deposit.acc_type_cd In(2,4,5,3) Then
+      ld_opening_prn := r_deposit.prn_amt;
+
+      Select F_CALCTDINTT_REG(r_deposit.acc_type_cd,
+              ld_opening_prn,
+                r_deposit.opening_dt,
+              r_deposit.intt_trf_type,
+              (r_deposit.mat_dt - r_deposit.opening_dt),
+              r_deposit.intt_rt,
+              365)
+      into   ld_mat_val
+      from   dual;
+      If as_acc_status = 'C' Then
+      Begin
+       Select Nvl(amount,0)
+       Into   ld_opening_prn
+       From   v_trans_dtls
+       Where  acc_type_cd = r_deposit.acc_type_cd
+       And    acc_num     = r_deposit.acc_num
+       And    approval_status = 'A'
+       And    trans_mode In ('C','R')
+		 And    trans_dt = (Select max(trans_dt)
+					 			  From   v_trans_dtls
+					  			  Where  acc_type_cd = r_deposit.acc_type_cd
+ 								  And    acc_num     = r_deposit.acc_num
+ 								  And    approval_status = 'A'
+ 								  And    trans_mode In ('C','R')
+								  And     trans_dt <= adt_from_dt);
+      Exception
+        when no_data_found then
+        dbms_output.put_line(r_deposit.acc_type_cd||' '||r_deposit.acc_num);
+        end;
+		/*Exception
+			when too_many_rows then
+			dbms_output.put_line(r_deposit.acc_type_cd||' '||r_deposit.acc_num);
+		end;*/
+		 SELECT Nvl(trans_mode,'Z')
+		 INTO    ls_trans_mode
+		 FROM   v_trans_dtls
+	     WHERE  acc_type_cd = r_deposit.acc_type_cd
+	      And    acc_num     = r_deposit.acc_num
+	      AND    trans_dt = r_deposit.acc_close_dt;
+	      IF ls_trans_mode = 'R' THEN
+	          ls_particulars := 'By Renew';
+	      ELSIF   ls_trans_mode = 'C' THEN
+	          SELECT trf_type
+			      INTO    ls_trf_type
+			      FROM   v_trans_dtls
+			      WHERE  acc_type_cd = r_deposit.acc_type_cd
+			      And    acc_num     = r_deposit.acc_num
+			      AND    trans_dt = r_deposit.acc_close_dt
+			      AND    nvl(trans_mode,'Z')  = 'C';
+			      IF ls_trf_type = 'C' THEN
+			          ls_particulars := 'To Cash';
+			      ELSE
+			      	    SELECT particulars
+					      INTO    ls_particulars
+					      FROM   v_trans_dtls
+					      WHERE  acc_type_cd = r_deposit.acc_type_cd
+					      And    acc_num     = r_deposit.acc_num
+					      AND    trans_dt = r_deposit.acc_close_dt
+					      AND    nvl(trans_mode,'Z') = 'C';
+					END IF;
+	      		END IF;
+		ELSE
+		ls_particulars := '';
+       end if;
+      Insert Into tt_open_close_register(acc_type_cd,
+                 acc_num,
+                 dep_loan_flag,
+                 cust_cd,
+                   opening_dt,
+                 opening_prn,
+                 acc_status,
+                 intt_rt,
+                 period,
+                 agent_cd,
+                 mat_val,
+                 mat_dt,
+                 intt_amt,
+                 particulars)
+             Values(r_deposit.acc_type_cd,
+                r_deposit.acc_num,
+                'D',
+                r_deposit.cust_cd,
+                Decode(as_acc_status,'O',r_deposit.opening_dt,r_deposit.acc_close_dt),
+                ld_opening_prn,
+                as_acc_status,
+                r_deposit.intt_rt,
+                r_deposit.dep_period,
+                r_deposit.agent_cd,
+                Decode(as_acc_status,'O',(ld_opening_prn + ld_mat_val),(ld_opening_prn + r_deposit.closing_intt_amt)),
+                r_deposit.mat_dt,
+                Decode(as_acc_status,'O',ld_mat_val,r_deposit.closing_intt_amt),
+                ls_particulars);
+  End if;
+End loop;
+End;
+End;
+

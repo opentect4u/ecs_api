@@ -1,0 +1,163 @@
+CREATE OR REPLACE PROCEDURE P_PL_SCROLL    (adt_dt  
+    Date) 
+As  
+ld_sl_no      Number(10,2);  
+ld_sl_no_cr   Number(10,2);  
+ld_sl_no_dr   Number(10,2);  
+ld_count_srl  Number(10,2);  
+ld_acc_type   Number(10,2);  
+ld_pl_amt     Number(10,2);  
+ld_count		  Number(10,2):=0;
+ld_voucher_id Number(10,2):=0;
+ld_profit_amt Number(10,2):=0;	
+Begin  
+  Declare Cursor c_pl_in is  
+   Select         a.balance_amt bal_amt, 
+                  a.acc_cd ac_cd , 
+                  b.schedule_cd sch_cd_pl  
+    From          tm_acc_balance  a,  
+                  m_acc_master    b    
+    Where         a.acc_cd = b.acc_cd  
+    And           a.acc_cd In     (Select acc_cd  
+                                   From   m_acc_master  
+                                   Where  acc_type In (3,4))     
+    And           a.balance_dt  = (Select   Max(balance_dt)    
+                                   From    tm_acc_balance    
+                                   Where    balance_dt <=to_Date(adt_dt))  
+    And    a.balance_amt <> 0 
+	 And    a.acc_cd      <> 46101; 
+  --  Group by a.acc_cd,b.schedule_cd;  
+Begin  
+  Delete from tt_pl_book;  
+  ld_sl_no_dr := 1;  
+  ld_sl_no_cr := 1;  
+For  r_pl in c_pl_in Loop  
+ /*   
+   Select Nvl(max(sl_no),0)+1  
+   Into   ld_sl_no  
+   From   tt_pl_book;     
+*/  
+   Select acc_type  
+   Into   ld_acc_type  
+   From   m_acc_master  
+   Where  acc_cd = r_pl.ac_cd; 
+ If r_pl.bal_amt < 0 Then  
+  Select  count(*)  
+  Into    ld_count_srl  
+  From   tt_pl_book  
+  Where  sl_no = ld_sl_no_cr;  
+ If ld_count_srl > 0 Then  
+      Update  tt_pl_book  
+      Set     cr_acc_cd = r_pl.ac_cd,  
+             cr_amount = Abs(r_pl.bal_amt),  
+             sch_cd_cr = r_pl.sch_cd_pl  
+      Where   sl_no     = ld_sl_no_cr;   
+   --   Dbms_output.Put_line('cr_acc_cd 1'||' '||r_pl.ac_cd); 
+    Else  
+      Insert Into tt_pl_book (sl_no,cr_acc_cd,cr_amount,sch_cd_cr)  
+         values  (ld_sl_no_cr,  
+                 r_pl.ac_cd,  
+              Abs(r_pl.bal_amt),   
+                 r_pl.sch_cd_pl);  
+      --   Dbms_output.Put_line('cr_acc_cd 2'||' '||r_pl.ac_cd);         
+    End If;  
+  ld_sl_no_cr := ld_sl_no_cr + 1;  
+--End If; 
+ --end Loop;  
+Else  
+    Select count(*)  
+    Into    ld_count_srl  
+    From   tt_pl_book  
+    Where   sl_no = ld_sl_no_dr;  
+  If ld_count_srl > 0 Then  
+      Update  tt_pl_book  
+       Set     dr_acc_cd = r_pl.ac_cd,  
+             dr_amount = r_pl.bal_amt,  
+            sch_cd    = r_pl.sch_cd_pl  
+     Where     sl_no     = ld_sl_no_dr;    
+    Else  
+      Insert Into tt_pl_book (sl_no,dr_acc_cd,dr_amount,sch_cd)  
+         values  (ld_sl_no_dr,  
+                 r_pl.ac_cd,  
+                 r_pl.bal_amt,  
+                 r_pl.sch_cd_pl );  
+    End If;  
+    ld_sl_no_dr := ld_sl_no_dr +1;  
+ End If;   
+End Loop;  
+  Select sum(Nvl(cr_amount,0)) - sum(Nvl(dr_amount,0))     
+  Into   ld_pl_amt  
+  From   tt_pl_book;  
+   -- dbms_output.put_line('ld_pl_amt '||' '||ld_pl_amt);  
+    If ld_pl_amt > 0 Then  
+     Select count(*)  
+     Into   ld_count_srl  
+     From   tt_pl_book  
+     Where  sl_no = ld_sl_no_dr;  
+   -- dbms_output.put_line('ld_count_srl '||' '||ld_count_srl);   
+   If ld_count_srl >0 Then  
+      Update tt_pl_book  
+      Set    dr_acc_cd =13201,  
+           dr_amount = ABS(ld_pl_amt)  
+      Where  sl_no     = ld_sl_no_dr;  
+      -- dbms_output.put_line('ld_pl_amt '||' '||ld_pl_amt); 
+   Else  
+     Insert Into tt_pl_book (sl_no,dr_acc_cd,dr_amount)  
+        values  (ld_sl_no_dr,  
+             13201,  
+            AbS(ld_pl_amt));  
+      dbms_output.put_line('ld_sl_no_dr '||' '||ld_sl_no_dr); 
+      dbms_output.put_line('ld_pl_amt '||' '||ld_pl_amt);       
+   End If;  
+  -- dbms_output.put_line('ld_sl_no_dr'||' '||ld_sl_no_dr);  
+   ld_sl_no_dr := ld_sl_no_dr +1;  
+  Else  
+   dbms_output.put_line('ld_sl_no_cr'||' '||ld_sl_no_cr); 
+   Select  count(*)  
+   Into    ld_count_srl  
+   From     tt_pl_book  
+   Where   sl_no = ld_sl_no_cr;  
+ If ld_count_srl > 0 Then  
+   dbms_output.put_line('ld_count_srl'||' '||ld_count_srl); 
+   dbms_output.put_line('ld_sl_no_cr'||' '||ld_sl_no_cr); 
+    Update tt_pl_book  
+    Set    cr_acc_cd = 29101,  
+         cr_amount = ABS(ld_pl_amt)  
+    Where  sl_no     = ld_sl_no_cr;    
+   dbms_output.put_line('sss'||' '||TO_char(SQL%ROWCOUNT));  
+   Else  
+    Insert Into tt_pl_book (sl_no,cr_acc_cd,cr_amount)  
+      values  ( ld_sl_no_cr,  
+             29101,  
+             AbS(ld_pl_amt));  
+   End If;  
+   dbms_output.put_line('ld_sl_no_cr'||' '||ld_sl_no_cr);  
+   ld_sl_no_cr := ld_sl_no_cr +1;  
+  End If;
+/*
+  Select count(*)
+  Into   ld_count
+  From   t_pl_appropiation_dtls
+  Where  voucher_dt = adt_dt;
+  If ld_count > 0 Then
+	  Select Distinct voucher_id
+	  Into   ld_voucher_id
+	  From   t_pl_appropiation_dtls
+     where  voucher_dt = adt_dt;
+	  Select Nvl(amount,0)
+	  Into   ld_profit_amt
+	  From   t_voucher_dtls
+	  Where  voucher_dt = adt_dt
+	  And    voucher_id  = ld_voucher_id
+	  And    acc_cd      = 46101;
+	  Select MAx(sl_no) + 1
+	  Into   ld_sl_no_dr
+	  From   tt_pl_book;
+	  Insert Into tt_pl_book (sl_no,dr_acc_cd,dr_amount)  
+      values  ( ld_sl_no_dr,  
+             13201,  
+             ld_profit_amt); 
+ End if;		*/ 
+ End;  
+End;
+

@@ -1,0 +1,220 @@
+CREATE OR REPLACE procedure p_networth
+(ad_memb_id   NUMBER,
+ adt_dt    Date)
+As
+ld_intt_amt 		Number(20,2):=0.00;
+ldt_frm_dt 			DATE;
+/*ldt_dt  			DATE := To_date(f_getparamval('206'));*/
+ld_balance 			Number(20,2):=0.00;
+ld_count    		Number(10):=0;
+ld_max_cd			Number(10):=0;
+ldt_max_dt			DATE;
+Begin
+  Declare cursor c_dep Is
+  Select  *
+  From    tm_deposit
+  Where   cust_cd      =  ad_memb_id
+  And     Nvl(acc_status,'O') =  'O'
+  Order By acc_type_cd;
+
+  Cursor c_loan Is
+  Select *
+  From   tm_loan_all
+  Where  party_cd = ad_memb_id
+  AND    curr_prn > 0;
+Begin
+  Delete From tt_networth;
+
+  For r_dep In c_dep Loop
+    If r_dep.acc_type_cd IN (1,8,9,10,11,12)  Then
+    Begin
+     Select Nvl(balance_amt,0)
+     Into   ld_balance
+     From   gm_sb_balance
+     Where  acc_type_cd = r_dep.acc_type_cd
+     And    acc_num     = r_dep.acc_num
+     And    balance_dt  = (SELECT Max(balance_dt)
+             FROM   gm_sb_balance
+             WHERE  acc_type_cd = r_dep.acc_type_cd
+             And    acc_num     = r_dep.acc_num
+             AND    balance_dt  <= adt_dt);
+     Exception
+     When no_data_found Then
+     ld_balance := 0;
+     End;
+
+     IF r_dep.acc_type_cd = 1 THEN
+
+       /*p_sb_product_patch_new(r_dep.acc_num);
+
+        SELECT F_CALC_SB_INTT(r_dep.acc_num)
+        INTO   ld_intt_amt
+        FROM   DUAL;*/
+
+        ld_intt_amt := 0;
+
+     ELSIF r_dep.acc_type_cd = 9 THEN
+ 
+        
+         SELECT nvl(Sum(intt_amt),0)
+	     INTO   ld_intt_amt
+	     FROM   tm_intt_payable
+	     WHERE  acc_type_cd  = 9
+	     AND    acc_num      = r_dep.acc_num
+	     AND    paid_flag    = 'U';
+
+       
+     ELSIF r_dep.acc_type_cd = 8 THEN
+    
+    	 SELECT nvl(Sum(intt_amt),0)
+	     INTO   ld_intt_amt
+	     FROM   tm_intt_payable
+	     WHERE  acc_type_cd  = 8
+	     AND    acc_num      = r_dep.acc_num
+	     AND    paid_flag    = 'U';
+        
+
+     ELSIF r_dep.acc_type_cd = 10 THEN
+
+         SELECT nvl(Sum(intt_amt),0)
+	     INTO   ld_intt_amt
+	     FROM   tm_intt_payable
+	     WHERE  acc_type_cd  = 10
+	     AND    acc_num      = r_dep.acc_num
+	     AND    paid_flag    = 'U';
+
+       
+      END IF;
+
+
+     Insert Into tt_networth(acc_type_cd,
+             acc_num,
+             cust_cd,
+             dep_loan_flag,
+             prn_amt,
+             intt_amt,
+             intt_rt)
+             --opening_dt)
+          Values(r_dep.acc_type_cd,
+             r_dep.acc_num,
+             ad_memb_id,
+               'D',
+             ld_balance,
+             ld_intt_amt,
+             0);
+             --r_dep.opening_dt);
+
+
+    ElsIf r_dep.acc_type_cd = 2 Then
+      Select F_CALCTDINTT_REG (r_dep.acc_type_cd,
+                 r_dep.prn_amt,
+                 r_dep.opening_dt,
+                 r_dep.intt_trf_type,
+                 (adt_dt - r_dep.opening_dt) + 1,
+                 r_dep.intt_rt,
+               365)
+      Into   ld_intt_amt
+        From   Dual;
+
+       Insert Into tt_networth(acc_type_cd,
+             acc_num,
+             cust_cd,
+             dep_loan_flag,
+             prn_amt,
+             intt_amt,
+             intt_rt,
+             mat_dt)
+             --opening_dt)
+          Values(r_dep.acc_type_cd,
+             r_dep.acc_num,
+             ad_memb_id,
+               'D',
+             Nvl(r_dep.prn_amt,0),
+             ld_intt_amt,
+             r_dep.intt_rt,
+             r_dep.mat_dt);
+               --r_dep.opening_dt);
+               
+   ElsIf r_dep.acc_type_cd = 6 THEN
+
+      SELECT count(*)
+      INTO   ld_count
+      FROM   TD_RD_INSTALLMENT
+      WHERE  acc_num  = r_dep.acc_num
+      AND    status   = 'P'
+      AND    dep_cd   = r_dep.renew_id;
+
+      ld_balance := (ld_count * r_dep.instl_amt);
+      
+
+      Select F_CALCRDINTT_REG (r_dep.acc_num,
+                 r_dep.instl_amt,
+                 ld_count,
+                 r_dep.intt_rt
+                 )
+      Into   ld_intt_amt
+         From   Dual;
+
+
+
+       Insert Into tt_networth(acc_type_cd,
+             acc_num,
+             cust_cd,
+             dep_loan_flag,
+             prn_amt,
+             intt_amt,
+             intt_rt,
+             mat_dt)
+            -- opening_dt)
+          Values(r_dep.acc_type_cd,
+             r_dep.acc_num,
+             ad_memb_id,
+               'D',
+             ld_balance,
+             ld_intt_amt,
+             r_dep.intt_rt,
+             r_dep.mat_dt);
+             --r_dep.opening_dt);
+    End If;
+ End Loop;
+
+
+ For r_loan In c_loan LOOP
+ 
+ 	  
+
+   Begin
+     Select Nvl(curr_prn,0),
+     		Nvl(curr_intt,0) + Nvl(ovd_intt,0)
+     Into   ld_balance,
+     		ld_intt_amt
+     From   tm_loan_all
+     Where  acc_cd      = r_loan.acc_cd
+     And    loan_id     = r_loan.loan_id;
+    Exception
+    When no_data_found Then
+     ld_balance := 0;
+     ld_intt_amt :=0;
+     End;
+ 
+
+   Insert Into tt_networth(acc_type_cd,
+             acc_num,
+             cust_cd,
+             dep_loan_flag,
+             prn_amt,
+             intt_amt,
+             intt_rt)
+             --opening_dt)
+          Values(r_loan.acc_cd,
+             r_loan.loan_id,
+             ad_memb_id,
+               'L',
+             nvl(ld_balance,0),
+             nvl(ld_intt_amt,0),
+             r_loan.curr_rt);
+             --r_loan.sanc_dt);
+ End Loop;
+End;
+End;
+

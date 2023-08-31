@@ -1,0 +1,243 @@
+CREATE OR REPLACE PROCEDURE p_detailed_list_loan
+(ad_acc_cd		NUMBER,
+ adt_dt			DATE)
+ AS
+ ls_name		VARCHAR2(500);
+ ld_curr_prn	NUMBER(20,2):=0;
+ ld_ovd_prn     NUMBER(20,2):=0;
+ ld_curr_intt	NUMBER(20,2):=0;
+ ld_ovd_intt	NUMBER(20,2):=0;
+ ls_status		VARCHAR2(5);
+ ldt_max_dt		DATE;
+ ld_max_cd		NUMBER(10):=0;
+ ls_emp_cd		VARCHAR2(20);
+ ld_prev_intt	NUMBER(20,2):=0;
+ ldt_sanc_dt    DATE;
+ ld_sanc_amt    NUMBER(20,2):=0.00;
+ LDT_DUE_DT		DATE;
+
+ BEGIN
+ 		DECLARE CURSOR c_loan IS
+ 		SELECT *
+ 		FROM   TM_LOAN_ALL
+ 		WHERE  acc_cd = ad_acc_cd
+ 		AND    nvl(sanc_dt,to_date('01/01/1900','dd/mm/yyyy'))<= adt_dt;
+
+BEGIN
+		DELETE FROM TT_DETAILED_LIST_LOAN;
+
+		FOR r IN c_loan LOOP
+		
+		---dbms_output.PUT_LINE(r.party_cd||' '||r.loan_id);
+		
+	   --	begin
+			SELECT member_name,
+				   member_status,
+				   emp_code
+			INTO   ls_name,
+				   ls_status,
+				   ls_emp_cd
+			FROM   MM_MEMBER
+			WHERE  member_id = r.party_cd;
+		   /*	EXCEPTION
+			WHEN NO_DATA_FOUND THEN
+			dbms_output.PUT_LINE(r.party_cd);
+			END;*/
+
+			SELECT max(trans_dt)
+			INTO   ldt_max_dt
+			FROM   gm_loan_trans
+			WHERE  loan_id  = r.loan_id
+			AND    trans_dt <= adt_dt;
+
+			SELECT max(trans_cd)
+			INTO   ld_max_cd
+			FROM   gm_loan_trans
+			WHERE  loan_id  = r.loan_id
+			AND    trans_dt = ldt_max_dt;
+
+			SELECT nvl(sum(curr_prn),0)
+			INTO   ld_curr_prn
+			FROM   gm_loan_trans
+			WHERE  loan_id  = r.loan_id
+			AND    trans_dt = ldt_max_dt
+			AND    trans_cd = ld_max_cd;
+			
+			SELECT nvl(sum(ovd_prn),0)
+			INTO   ld_ovd_prn
+			FROM   gm_loan_trans
+			WHERE  loan_id  = r.loan_id
+			AND    trans_dt = ldt_max_dt
+			AND    trans_cd = ld_max_cd;
+			
+			SELECT nvl(sum(curr_intt),0)
+			INTO   ld_curr_intt
+			FROM   gm_loan_trans
+			WHERE  loan_id  = r.loan_id
+			AND    trans_dt = ldt_max_dt
+			AND    trans_cd = ld_max_cd;
+			
+			
+			SELECT nvl(sum(ovd_intt),0)
+			INTO   ld_ovd_intt
+			FROM   gm_loan_trans
+			WHERE  loan_id  = r.loan_id
+			AND    trans_dt = ldt_max_dt
+			AND    trans_cd = ld_max_cd;
+			
+
+		   /*	IF last_day(adt_dt) <=  last_day(r.last_intt_calc_dt) THEN
+
+				SELECT max(trans_dt)
+		        INTO   ldt_max_dt
+		        FROM   gm_loan_trans
+		        WHERE  loan_id  = r.loan_id
+		        AND    trans_dt <= adt_dt;
+
+		         SELECT Max(trans_cd)
+				INTO    ld_max_cd
+				 FROM   gm_loan_trans
+				 WHERE  loan_id = r.loan_id
+				 AND      trans_dt = ldt_max_dt;
+
+			BEGIN
+			
+				SELECT Nvl(curr_intt,0) +
+						   Nvl(ovd_intt,0)
+				INTO    ld_prev_intt
+			    FROM   gm_loan_trans
+			    WHERE  loan_id = r.loan_id
+			    AND      trans_dt = ldt_max_dt
+			    AND      trans_cd = ld_max_cd;
+			    
+			EXCEPTION
+			
+				WHEN NO_DATA_FOUND THEN
+				 ld_prev_intt := 0;
+			END;
+				
+					SELECT f_calc_loan_intt(r.loan_id,
+			        					 adt_dt,
+			        					 'C')
+			     	INTO  ld_curr_intt
+			     	FROM DUAL;
+			     	
+					SELECT 	f_calc_loan_intt(r.loan_id,
+			        					 adt_dt,
+			        					 'O')
+			        INTO	ld_ovd_intt
+			        FROM	DUAL;
+			        
+			        IF ld_ovd_intt > 0 THEN
+			        
+			        ld_ovd_intt  := (ld_ovd_intt + ld_prev_intt);
+			        
+			        ELSE
+			        
+			     	ld_curr_intt := (ld_curr_intt + ld_prev_intt);
+			     	
+			     	END IF;
+			     	
+			    BEGIN
+			     	
+				SELECT 	DUE_DT
+				INTO	LDT_DUE_DT
+				FROM   	TM_LOAN_ALL
+				WHERE  	LOAN_ID = R.LOAN_ID
+				AND	   	acc_cd IN (23101, 23106, 23107, 23108, 23109);
+				
+				EXCEPTION
+				WHEN NO_DATA_FOUND THEN
+				dbms_output.PUT_LINE(r.loan_id);
+				END;
+ 	   					
+				   IF 	LDT_DUE_DT < ADT_DT  THEN
+					
+					   	ld_ovd_intt := ld_prev_intt;
+					   	ld_curr_intt := ld_curr_intt - ld_prev_intt;
+					   
+					END IF;
+			
+		 ELSE
+		 
+			     SELECT f_calc_loan_intt(r.loan_id,
+			        					 adt_dt,
+			        					 'C')
+			     INTO  ld_curr_intt
+			     FROM DUAL;
+				 
+				 SELECT f_calc_loan_intt(r.loan_id,
+			        					 adt_dt,
+			        					 'O')
+			     INTO	LD_OVD_INTT
+			     FROM	DUAL;
+			     
+	
+			     SELECT Nvl(curr_intt,0) + Nvl(ovd_intt,0)
+			     INTO   ld_prev_intt
+			     FROM   TM_LOAN_ALL
+			     WHERE  loan_id  = r.loan_id;
+				 
+			    IF ld_ovd_intt > 0 THEN
+			        
+			        ld_ovd_intt  := (ld_ovd_intt + ld_prev_intt);
+			        
+			     ELSE
+			        
+			     	ld_curr_intt := (ld_curr_intt + ld_prev_intt);
+			     	
+			     END IF;
+			    
+			    BEGIN
+			     
+				SELECT 	DUE_DT
+				INTO	LDT_DUE_DT
+				FROM   	TM_LOAN_ALL
+				WHERE  	LOAN_ID = R.LOAN_ID
+				AND	   	acc_cd IN (23101, 23106, 23107, 23108, 23109);
+				EXCEPTION
+				WHEN NO_DATA_FOUND THEN
+				dbms_output.PUT_LINE(r.loan_id);
+				END;
+ 	   					
+				   IF 	LDT_DUE_DT < ADT_DT  THEN
+					
+					   	ld_ovd_intt := ld_prev_intt;
+					   	ld_curr_intt := ld_curr_intt - ld_prev_intt;
+					   
+					END IF;
+			   
+		 END IF;*/
+
+
+			SELECT sanc_dt,sanc_amt
+			INTO  ldt_sanc_dt,ld_sanc_amt
+			FROM TM_LOAN_ALL
+			WHERE LOAN_ID =r.loan_id;
+
+
+
+		   	INSERT INTO TT_DETAILED_LIST_LOAN
+							VALUES(ad_acc_cd,
+								   ls_name,
+								   r.curr_rt,
+								   0,
+								   ld_curr_prn,
+								   ld_ovd_prn,
+								   ld_curr_intt,
+								   ld_ovd_intt,
+								   ls_emp_cd,
+								   r.loan_id,
+								   ls_status,
+								   adt_dt,
+								   ldt_sanc_dt,
+								   ld_sanc_amt
+								   );
+
+
+
+
+   END LOOP;
+   END;
+   END;
+

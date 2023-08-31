@@ -1,0 +1,4 @@
+*.zip
+node_modules/
+instantclient/
+eccsapi_ssl/

@@ -1,0 +1,239 @@
+CREATE OR REPLACE PROCEDURE P_CASH_BOOK_REP  ( 
+    ad_cash_acc_cd In Number,     
+  adt_from_dt    In Date,     
+  adt_to_dt      In Date)     
+Is     
+ld_debit_sum            Number(20,2) ;     
+ld_credit_sum           Number(20,2) ;     
+ld_debit_sum_tr         Number(20,2) ;     
+ld_credit_sum_tr        Number(20,2) ; 
+ld_debit_sum_cl         Number(20,2) ;
+ld_credit_sum_cl        Number(20,2) ;
+ld_srl_no               Number(20)   ;     
+ls_credit_particulars   Varchar2(500);     
+ls_debit_particulars    Varchar2(500);     
+ls_particulars          Varchar2(500); 
+--ld_acc_cd				Number(    
+Begin     
+ Declare Cursor   c_cash_acc Is     
+ Select  Distinct acc_cd     
+ From    t_voucher_dtls     
+ Where   acc_cd Not In (ad_cash_acc_cd, 10000)     
+ And     voucher_dt Between adt_from_dt And adt_to_dt
+ ORDER BY acc_cd;     
+Begin     
+ ld_debit_sum         := 0.00;     
+ ld_credit_sum        := 0.00;     
+ ld_debit_sum_tr      := 0.00;     
+ ld_credit_sum_tr     := 0.00;
+ ld_debit_sum_cl      := 0.00;
+ ld_credit_sum_cl     :=0.00;     
+ ld_srl_no            := 0;     
+ ls_debit_particulars   := 'To Opening Balance';     
+ ls_credit_particulars  := 'By Closing Balance' ;     
+ Delete From tt_cash_account;     
+ Select balance_amt     
+ Into   ld_debit_sum     
+ From   tm_acc_balance     
+ Where  balance_dt = ( Select max(balance_dt)     
+                       From   tm_acc_balance     
+                       Where  balance_dt < adt_from_dt)    
+ And     acc_cd = ad_cash_acc_cd;     
+ Select nvl(max(srl_no),0) + 1     
+ Into  ld_srl_no     
+ From  tt_cash_account;     
+ Insert Into tt_cash_account (  srl_no ,     
+                                dr_particulars,     
+                                dr_amt,
+						                    dr_acc_cd
+						                   )   
+ Values        ( ld_srl_no,     
+                ls_debit_particulars,     
+                ld_debit_sum,
+					      21101
+					      );     
+ For cash_acc in c_cash_acc Loop
+ /**Getting Cash Debit Amount**/     
+  Select NVL(sum(amount),0)     
+  Into   ld_credit_sum     
+  From   t_voucher_dtls     
+  Where   acc_cd = cash_acc.acc_cd     
+  And    voucher_dt Between adt_from_dt And adt_to_dt     
+  And    transaction_type = 'C'   
+  And    debit_credit_flag = 'D';     
+  /**Getting Cash Credit Amount**/
+  Select NVL(sum(amount),0)     
+  Into   ld_debit_sum     
+  From   t_voucher_dtls     
+  Where  acc_cd = cash_acc.acc_cd     
+  And    voucher_dt Between adt_from_dt And adt_to_dt     
+  And    transaction_type = 'C'   
+  And    debit_credit_flag = 'C';
+  /**Getting Transfer Debit Amount**/     
+  Select NVL(sum(amount),0)     
+  Into   ld_credit_sum_tr     
+  From   t_voucher_dtls     
+  Where  acc_cd = cash_acc.acc_cd     
+  And    voucher_dt Between adt_from_dt And adt_to_dt     
+  And    transaction_type  = 'T'   
+  And    debit_credit_flag = 'D';     
+  /**Getting Transfer Credit Amount**/
+  Select NVL(sum(amount),0)     
+  Into   ld_debit_sum_tr     
+  From   t_voucher_dtls     
+  Where  acc_cd = cash_acc.acc_cd     
+  And    voucher_dt Between adt_from_dt And adt_to_dt     
+  And    transaction_type  = 'T'   
+  And    debit_credit_flag = 'C';
+  /**Getting Clearing Debit Amount**/
+  Select NVL(sum(amount),0)     
+  Into   ld_credit_sum_cl  
+  From   t_voucher_dtls     
+  Where  acc_cd = cash_acc.acc_cd     
+  And    voucher_dt Between adt_from_dt And adt_to_dt     
+  And    transaction_type  = 'L'   
+  And    debit_credit_flag = 'D';
+  /**Getting Clearing Credit Amount**/
+  Select NVL(sum(amount),0)     
+  Into   ld_debit_sum_cl     
+  From   t_voucher_dtls     
+  Where  acc_cd = cash_acc.acc_cd     
+  And    voucher_dt Between adt_from_dt And adt_to_dt     
+  And    transaction_type  = 'L'   
+  And    debit_credit_flag = 'C';
+  /**Getting Name of A/C Heads from m_acc_master**/     
+  Select acc_name     
+  Into   ls_particulars     
+  From   m_acc_master     
+  Where   acc_cd = cash_acc.acc_cd;     
+  /**Particulars For Debit **/   
+   ls_credit_particulars    := 'By ' || ls_particulars ;     
+   ls_debit_particulars     := 'To ' || ls_particulars ;       
+  Select nvl(min(srl_no), 0)     
+  Into   ld_srl_no     
+  From   tt_cash_account    
+  Where  nvl(dr_particulars, 'null') = 'null';     
+  Dbms_output.put_line('ld_srl_no1'||' '||ld_srl_no);
+  /**Inserting For Debit amount (cash,Transfer,Clearing)**/
+  If ld_debit_sum > 0 Or ld_debit_sum_tr > 0 Or ld_debit_sum_cl > 0 Then    
+  If ld_srl_no > 0 Then    
+      Update tt_cash_account    
+      Set  dr_particulars = ls_debit_particulars,    
+           dr_amt     = ld_debit_sum,
+           dr_amt_tr  = ld_debit_sum_tr, 
+           dr_amt_cl  = ld_debit_sum_cl, 
+	         dr_acc_cd  = cash_acc.acc_cd
+      Where srl_no    = ld_srl_no;    
+   Else    
+      Select nvl(max(srl_no), 0)     
+      Into   ld_srl_no     
+      From   tt_cash_account ;     
+      Insert Into tt_cash_account ( srl_no,    
+						                        dr_particulars,     
+						                        dr_amt,   
+						                        dr_amt_tr,
+						                        dr_amt_cl, 
+						                        dr_acc_cd )    
+      Values        (ld_srl_no + 1,    
+						         ls_debit_particulars,    
+						         ld_debit_sum,   
+						         ld_debit_sum_tr,
+						         ld_debit_sum_cl, 
+						         cash_acc.acc_cd ) ;    
+   End If;    
+   End If;    
+  Select nvl(min(srl_no), 0)     
+  Into   ld_srl_no     
+  From   tt_cash_account    
+  Where  nvl(cr_particulars, 'null') = 'null';    
+  /**Inserting For Credit amount (cash,Transfer,Clearing)**/ 
+  If ld_credit_sum > 0 Or ld_credit_sum_tr > 0 Or ld_credit_sum_cl >0 Then    
+  If ld_srl_no > 0 Then    
+    Update tt_cash_account    
+    Set    cr_particulars = ls_credit_particulars,    
+           cr_amt      = ld_credit_sum,   
+           cr_amt_tr   = ld_credit_sum_tr,
+           cr_amt_cl   = ld_credit_sum_cl,
+	         cr_acc_cd   = cash_acc.acc_cd     
+    Where  srl_no   = ld_srl_no;  
+   Else    
+    Select nvl(max(srl_no), 0)     
+      Into ld_srl_no     
+      From tt_cash_account ; 
+    Insert Into tt_cash_account ( srl_no,    
+						                      cr_particulars,     
+						                      cr_amt,   
+						                      cr_amt_tr,
+						                      cr_amt_cl, 
+						                      cr_acc_cd)    
+    Values  ( ld_srl_no + 1,    
+						ls_credit_particulars,    
+						ld_credit_sum,   
+						ld_credit_sum_tr,
+						ld_credit_sum_cl, 
+						cash_acc.acc_cd );    
+   End If;    
+   End If;    
+ End Loop;     
+  /**For Closing Balance**/
+    Select    balance_amt     
+    Into      ld_credit_sum     
+    From      tm_acc_balance     
+    Where     balance_dt = (  Select max(balance_dt)     
+                              From  tm_acc_balance     
+                              Where  balance_dt <= adt_to_dt)  
+    And    acc_cd = ad_cash_acc_cd;    
+  ls_credit_particulars  := 'By Closing Balance' ;     
+  Select nvl(min(srl_no), 0)     
+  Into   ld_srl_no     
+  From   tt_cash_account    
+  Where nvl(cr_particulars, 'null') = 'null';     
+  If ld_srl_no = 0 Then    
+   Select nvl(max(srl_no),0) + 1     
+   Into   ld_srl_no     
+   From   tt_cash_account;     
+   Insert Into tt_cash_account (  srl_no ,     
+                                  cr_particulars ,     
+                                  cr_amt,
+				                          cr_acc_cd
+				                          )    
+        Values (  ld_srl_no,     
+                  ls_credit_particulars,     
+                  ld_credit_sum,
+				          21101
+				          );     
+ Else    
+    Update tt_cash_account    
+    Set  cr_particulars = ls_credit_particulars,    
+         cr_amt   = ld_credit_sum,
+		     cr_acc_cd =    21101
+    Where  srl_no   = ld_srl_no;     
+  End If;        
+  Update tt_cash_account   
+  Set cr_acc_cd =    21101
+  Where  cr_particulars = 'By Closing Balance';
+ /*****************************************************************************
+     For Toatl of Opening And Closing Balance - By Tan 19.07.2011
+ /****************************************************************************/     
+  Update tt_cash_account
+  Set    cr_amt = 0.00
+  Where  cr_amt Is null;
+  Update tt_cash_account
+  Set    dr_amt = 0.00
+  Where  dr_amt Is null;
+  Update tt_cash_account
+  Set    cr_amt_tr = 0.00
+  Where  cr_amt_tr Is null;
+  Update tt_cash_account
+  Set    dr_amt_tr = 0.00
+  Where  dr_amt_tr Is null;
+  Update tt_cash_account
+  Set    cr_amt_cl = 0.00
+  Where  cr_amt_cl Is null;
+  Update tt_cash_account
+  Set    dr_amt_cl = 0.00
+  Where  dr_amt_cl Is null;
+ /************************************************************************************/ 
+End;    
+End;
+

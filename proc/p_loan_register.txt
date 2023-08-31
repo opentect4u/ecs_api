@@ -1,0 +1,168 @@
+CREATE OR REPLACE PROCEDURE p_loan_register
+(adt_from_dt  DATE,
+ adt_to_date  DATE,
+ as_type   VARCHAR2)
+ AS
+ ls_name   VARCHAR2(200);
+ ls_chq_no   VARCHAR2(30);
+ ldt_chq_dt   DATE;
+ ld_instl_no  NUMBER(10):=0;
+ ld_intt_rt   NUMBER(10,2):=0;
+ ld_prn_instl  NUMBER(20,2):=0;
+ ld_intt_instl  NUMBER(20,2):=0;
+ ld_tr_acc_cd  NUMBER(10):=0;
+ ld_memb_id   NUMBER(10):=0;
+ ld_trf_cd   NUMBER(10):=0;
+ ls_tr_acc_no  VARCHAR2(20);
+ ls_bank_acc_no	VARCHAR2(40);
+ 
+ 
+ ls_emp_code		VARCHAR2(20);
+ ldt_trf_dt			DATE;
+  
+  
+ 
+
+ BEGIN
+   DECLARE CURSOR c_loan IS
+   SELECT  *
+   FROM    v_trans_dtls
+   WHERE   trans_dt BETWEEN adt_from_dt AND adt_to_date
+   AND     trans_type  IN ('B','R')
+   AND     approval_status = 'A'
+   ORDER BY TRANS_DT,
+            trans_cd;
+            
+   CURSOR c_trf IS
+   SELECT *
+   FROM   TD_DEP_TRANS_TRF
+   WHERE  trans_dt  = ldt_trf_dt
+   AND    trans_cd  = ld_trf_cd;
+
+ BEGIN
+   DELETE FROM tt_loan_register;
+
+   FOR r IN c_loan LOOP
+
+      SELECT party_cd,
+             instl_no,
+             instl_amt,
+             nvl(curr_rt,0)
+     INTO    ld_memb_id,
+             ld_instl_no,
+             ld_prn_instl,
+             ld_intt_rt
+     FROM   TM_LOAN_ALL
+     WHERE  loan_id = r.acc_num;
+
+     SELECT member_name,
+     	    emp_code
+     INTO   ls_name,
+     		ls_emp_code
+     FROM   MM_MEMBER
+     WHERE  member_id = ld_memb_id;
+
+     ---IF r.trf_type = 'C' THEN
+        ld_tr_acc_cd := 21101;
+        
+        IF r.trans_type = 'B' THEN
+        
+           INSERT INTO tt_loan_register
+             VALUES(ld_memb_id,
+                 	r.acc_num,
+                 	r.acc_type_cd,
+                 	ls_name,
+                 	r.trans_dt,
+                 	r.trans_type,
+                 	r.amount,
+                 	0,
+                 	r.sum_assured,
+                 	r.trf_type,
+                 	null,
+                 	null,
+                 	ld_instl_no,
+                 	ld_intt_rt,
+                 	ld_prn_instl,
+                 	0,
+                 	r.curr_prn_recov,
+                 	(r.curr_intt_recov + r.ovd_intt_recov),
+                 	null,
+                    r.trans_cd,
+                    null,
+                 	ls_emp_code,
+                 	r.share_amt);
+ 			END IF;
+ 			
+ 			IF r.trans_type = 'R' THEN
+        
+           INSERT INTO tt_loan_register
+             VALUES(ld_memb_id,
+                 	r.acc_num,
+                 	r.acc_type_cd,
+                 	ls_name,
+                 	r.trans_dt,
+                 	r.trans_type,
+                 	r.curr_prn_recov,
+                 	(r.curr_intt_recov + r.ovd_intt_recov),
+                 	0,
+                 	r.trf_type,
+                 	null,
+                 	null,
+                 	null,
+                 	null,
+                 	0,
+                 	0,
+                 	r.curr_prn_recov,
+                 	(r.curr_intt_recov + r.ovd_intt_recov),
+                 	null,
+                    r.trans_cd,
+                    null,
+                 	ls_emp_code,
+                 	0);
+ 			END IF;
+ 			
+ 			
+  /*	ELSIF r.trf_type = 'T' THEN
+ 	
+ 		  ldt_trf_dt := r.trans_dt;
+ 		  
+ 		  SELECT trf_cd
+ 		  INTO   ld_trf_cd
+ 		  FROM   TM_TRANSFER
+ 		  WHERE  trf_dt  = ldt_trf_dt
+ 		  AND    trans_cd  = r.trans_cd;
+ 		  
+ 		  FOR r1 IN c_trf LOOP
+ 		  
+ 		  	  INSERT INTO tt_loan_register
+             VALUES(ld_memb_id,
+                 	r.acc_num,
+                 	r.acc_type_cd,
+                 	ls_name,
+                 	r.trans_dt,
+                 	r.trans_type,
+                 	r.amount,
+                 	0,
+                 	r.sum_assured,
+                 	r.trf_type,
+                 	r1.instrument_num,
+                 	r1.instrument_dt,
+                 	ld_instl_no,
+                 	ld_intt_rt,
+                 	ld_prn_instl,
+                 	0,
+                 	r.curr_prn_recov,
+                 	r.curr_intt_recov,
+                 	null,
+                    r.trans_cd,
+                    Decode(r1.acc_type_cd,1,r1.acc_num,r1.acc_type_cd),
+                 	ls_emp_code,
+                 	r.share_amt);
+             END LOOP;
+       END IF;*/
+ 
+ 
+END LOOP;
+END;
+END;
+

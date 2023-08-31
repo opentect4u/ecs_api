@@ -1,0 +1,144 @@
+CREATE OR REPLACE PROCEDURE P_BLANCE_SCROLL (adt_dt Date) 
+As 
+ld_opening_amt    		Number(20,2); 
+ld_closing_amt    		Number(20,2); 
+ld_dr_amt      			Number(20,2); 
+ld_cr_amt      			Number(20,2); 
+adt_opn_dt      			Varchar2(10); 
+ad_mm       				Varchar2(5); 
+ad_yy       				Varchar2(5); 
+ld_srl_no      			Number(10); 
+ls_acc_name     			Varchar2(200);
+ldt_opn_dt              date;
+Begin 
+/*Selecting Financial Year*/ 
+ad_mm := to_char(adt_dt,'mm'); 
+ad_yy := To_char(adt_dt,'yyyy'); 
+
+If ad_mm between '01' and '03' Then 
+ ad_yy := ad_yy - 1; 
+ adt_opn_dt := '31/03/' || ad_yy; 
+ 
+  
+Else 
+ adt_opn_dt := '31/03/' || substr(adt_dt,7,4); 
+ 
+  
+End If; 
+Dbms_output.put_line('adt_opn_dt '||To_char(adt_opn_dt)); 
+/*Cursor to get all a/c codes of Liabilities and Assets except System Transfer and current PL*/ 
+Declare Cursor c_bal Is 
+Select schedule_cd sch_cd, 
+   acc_cd, 
+   acc_type, 
+   acc_name 
+From   m_acc_master 
+Where  acc_type In (1,2) 
+And   acc_cd Not In (10000, 13201); 
+Begin 
+Delete from tt_balance_sheet; 
+ld_opening_amt := 0.00; 
+ld_closing_amt := 0.00; 
+ld_dr_amt := 0.00; 
+ld_cr_amt := 0.00; 
+For r_bal In c_bal Loop 
+Select Nvl(Max(srl_no),0) +1 
+Into ld_srl_no 
+From tt_balance_sheet; 
+/*Getting Opening Balance*/ 
+If r_bal.acc_type in (1,2) then 
+ Begin 
+  Select balance_amt 
+  Into   ld_opening_amt 
+  From   tm_acc_balance 
+  Where  acc_cd = r_bal.acc_cd 
+  And    balance_dt = ( Select Max(balance_dt) 
+          From tm_acc_balance 
+          Where balance_dt <=to_Date(adt_opn_dt,'dd/mm/yyyy')); 
+ Exception 
+ When NO_DATA_FOUND Then 
+    ld_opening_amt := 0; 
+ End; 
+Else 
+ ld_opening_amt := 0; 
+end If; 
+/*Getting Closing Balance*/ 
+Select balance_amt 
+Into   ld_closing_amt 
+From   tm_acc_balance 
+Where  acc_cd = r_bal.acc_cd 
+And    balance_dt = (Select Max(balance_dt) 
+         From tm_acc_balance 
+       Where balance_dt <=to_Date(adt_dt)); 
+/*if r_bal.acc_cd = 10103 then 
+   Dbms_output.put_line(adt_opn_dt|| ' '||ld_opening_amt||' '||ld_closing_amt); 
+end if; */
+Select To_Date(adt_opn_dt,'dd/mm/yyyy') + 1
+Into   ldt_opn_dt
+From   Dual;
+/*Getting Dr Amt.*/ 
+Select NVL(sum(amount),0) 
+Into   ld_dr_amt 
+From   t_voucher_dtls 
+Where  acc_cd = r_bal.acc_cd 
+And    voucher_dt Between ldt_opn_dt And adt_dt 
+And    debit_credit_flag = 'D' ; 
+--Dbms_output.put_line('ld_dr_amt '||To_char(ld_dr_amt)); 
+/*Getting Cr Amt.*/ 
+Select NVL(sum(amount),0) 
+Into   ld_cr_amt 
+From   t_voucher_dtls 
+Where  acc_cd = r_bal.acc_cd 
+And    voucher_dt Between ldt_opn_dt And adt_dt 
+And    debit_credit_flag = 'C' ; 
+/*If ld_opening_amt = 0 Then 
+If r_bal.acc_type = '2' Then 
+ld_closing_amt := ABS(ld_opening_amt) -ld_cr_amt + ld_dr_amt; 
+Else 
+ld_closing_amt := ABS(ld_opening_amt) - ld_cr_amt + ld_dr_amt; 
+End If; 
+End If;*/ 
+    /*If r_bal.acc_cd < 20000 and ld_closing_amt > 0 Then*/ 
+   Insert Into tt_balance_sheet 
+         Values ( ld_srl_no, 
+      r_bal.acc_type, 
+      r_bal.sch_cd, 
+      r_bal.acc_cd, 
+      ld_opening_amt, 
+      ld_cr_amt, 
+      ld_dr_amt, 
+      ld_closing_amt, 
+          r_bal.acc_name, 
+      0); 
+/*Elsif r_bal.acc_cd < 20000 Then 
+            Insert Into tt_balance_sheet 
+         Values ( ld_srl_no, 
+r_bal.acc_type, 
+r_bal.sch_cd, 
+                         r_bal.acc_cd, 
+                         ld_opening_amt, 
+                         ld_cr_amt, 
+                         ld_dr_amt, 
+                         ABS(ld_closing_amt), 
+     r_bal.acc_name,0); 
+Else     
+        Insert Into tt_balance_sheet 
+         Values ( ld_srl_no, 
+r_bal.acc_type, 
+r_bal.sch_cd, 
+                         r_bal.acc_cd, 
+                         ld_opening_amt, 
+                         ld_cr_amt, 
+                         ld_dr_amt, 
+                         ld_closing_amt, 
+     r_bal.acc_name,0); 
+End If;*/ 
+End Loop; 
+Delete from tt_balance_sheet 
+where  Open_bal  = 0 
+and    cr_amt    = 0 
+and    dr_amt    = 0 
+and    close_bal  = 0; 
+End; 
+End;
+

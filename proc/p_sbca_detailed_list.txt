@@ -1,0 +1,159 @@
+CREATE OR REPLACE PROCEDURE P_SBCA_DETAILED_LIST (acctypecd number, 
+					  ----concd number ,
+					  adt_dt  date)   
+As                
+
+ld_dep_amt   			Number(20,2);                
+ld_wth_amt   			Number(20,2);                
+ld_balance   Number(20,2);             
+ls_cust_name  Varchar2(200);                
+ls_cons_desc  Varchar2(200); 
+ls_transfer_flag  Char(1);  
+ldt_transfer_dt   Date;  
+ls_insert_flag    Char(1);    
+ld_intt     Number(10,2):=0; 
+ldt_intt_dt DATE;              
+ls_cust_type VARCHAR2(5);
+ld_count		NUMBER(10):=0;
+ld_acc_type_cd	NUMBER(10):=0;
+ls_acc_num		VARCHAR2(200);
+
+
+
+ld_joint_count	NUMBER(10):=0;
+ls_joint		VARCHAR2(200);
+
+
+Begin                
+Declare Cursor cur_deposit Is                
+Select  acc_type_cd,     
+        acc_num,                
+        opening_dt,                
+        cust_cd,                
+        constitution_cd, 
+        nvl(bonus_amt, 0) bonus_amt,                    
+        Nvl(clr_bal, 0) clr_bal               
+From    tm_deposit                
+Where   acc_type_cd = acctypecd 
+---And     constitution_cd = concd    
+And     nvl(opening_dt,to_date('01/01/1900','dd/mm/yyyy')) <= adt_dt          
+--And     to_date(adt_dt,'dd/mm/yyyy') < decode(nvl(to_char(acc_close_dt, 'dd/mm/yyyy'), '31/12/2500'), '31/12/2500',to_date('31/12/2500'), acc_close_dt);
+And     adt_dt < decode(nvl(to_date(acc_close_dt, 'dd/mm/yyyy'), to_date('31/12/2500','dd/mm/yyyy')), to_date('31/12/2500','dd/mm/yyyy'),to_date('31/12/2500','dd/mm/yyyy'), acc_close_dt);
+
+CURSOR c_joint IS
+SELECT *
+FROM   TD_ACCHOLDER
+WHERE  acc_type_cd  = ld_acc_type_cd
+AND    acc_num      = ls_acc_num;
+
+   
+Begin                
+ld_dep_amt := 0.00;                
+ld_wth_amt := 0.00;                
+ld_balance := 0.00;            
+ 
+Delete From tt_sbca_dtl_list;   
+             
+For row_deposit In cur_deposit Loop 
+
+ld_acc_type_cd := row_deposit.acc_type_cd;
+ls_acc_num     := row_deposit.acc_num;
+
+
+
+ ls_insert_flag := 'Y';                 
+ Begin             
+  Select balance_amt             
+  Into   ld_balance             
+  From   gm_sb_balance             
+  Where  acc_type_cd = acctypecd   
+  And    acc_num = row_deposit.acc_num             
+  And    balance_dt = (Select max(balance_dt)             
+         From   gm_sb_balance             
+         Where  acc_type_cd = acctypecd             
+         And    acc_num = row_deposit.acc_num             
+         And    balance_dt <= adt_dt);             
+ Exception             
+  When NO_DATA_FOUND Then             
+   ld_balance := 0;             
+ End;    
+ 
+ 
+Select constitution_desc         
+Into   ls_cons_desc  
+From   mm_constitution                
+Where  acc_type_cd = acctypecd                
+And    constitution_cd = row_deposit.constitution_cd;  
+
+ 
+Begin             
+ Select member_name                
+ Into   ls_cust_name                
+ From   mm_member           
+ Where  member_id = row_deposit.cust_cd;    
+ Exception    
+  When no_data_found Then    
+   ls_cust_name := ' ';    
+End;    
+
+ 
+
+   FOR r IN c_joint LOOP
+   
+       ls_cust_name := ls_cust_name ||','||r.acc_holder;
+       
+   
+   END LOOP;   
+     
+  
+   
+
+Select Nvl(transfer_flag,'N'),Nvl(transfer_dt,to_date('01/01/1901','dd/mm/yyyy'))  
+Into     ls_transfer_flag,ldt_transfer_dt  
+From     tm_deposit  
+Where  acc_type_cd = acctypecd                     
+And    acc_num     = row_deposit.acc_num; 
+
+
+If ls_transfer_flag = 'Y' Then 
+ If ldt_transfer_dt > adt_dt Then  
+    ls_insert_flag := 'N';   
+ End If; 
+End If; 
+
+
+If  ls_insert_flag = 'Y' Then       
+ 
+/*IF acctypecd NOT In (1,12) THEN
+    SELECT Max(trans_dt)
+    INTO    ldt_intt_dt
+    FROM   tm_fund_intt
+    WHERE  acc_type_cd = acctypecd;
+    
+    SELECT Nvl(sum(intt_amt),0)
+    INTO    ld_intt
+    FROM    tm_fund_intt
+    WHERE  acc_type_cd = acctypecd
+    AND      acc_num      = row_deposit.acc_num
+    AND      status         = 'U';
+ ELSE
+ 	  ldt_intt_dt := NULL;
+ 	  ld_intt := 0.00;
+END IF;	 */
+
+   
+ Insert Into tt_sbca_dtl_list                
+ Values(acctypecd,                
+      row_deposit.acc_num,                
+      ls_cust_name,                
+      row_deposit.opening_dt,                
+      ls_cons_desc,                
+      ld_balance,     
+      0, ld_intt,
+      row_deposit.cust_cd,
+      ldt_intt_dt); 
+End If;   
+End Loop;                
+End;                
+End;
+
